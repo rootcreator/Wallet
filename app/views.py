@@ -1,25 +1,39 @@
+import logging
+
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.http import HttpResponse
+from django.core.exceptions import ObjectDoesNotExist
+from django.http import HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
+from rest_framework import serializers
+from rest_framework import status
 from rest_framework import viewsets
+from rest_framework.authtoken.models import Token
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-import logging
 
-from app import serializers
 from app.link_mono_client import (
     authenticate, set_user_id, get_account, get_transactions, get_statement,
     get_credits, get_debits, get_identity, bvn_lookup
 )
 from app.link_plaid_client import create_link_token, exchange_public_token
-from app.link_walletconnect import wc
-from app.models import LinkedAccount, Wallet, Transaction, CryptoWalletConnectSession, CryptoWalletConnectTransaction
+from app.models import Wallet
 from app.serializers import WalletSerializer, TransactionSerializer
 from app.stellar_anchors import ANCHORS
 from app.stellar_services import stellar_deposit, stellar_transfer
+from .serializers import UserSerializer
+
+# from app.link_walletconnect import wc
+
 logger = logging.getLogger(__name__)
+
+
+def csrf_token_view(request):
+    return JsonResponse({'csrf_token': get_token(request)})
 
 
 def get_anchor_for_user(user):
@@ -143,6 +157,118 @@ class TransferView(APIView):
             return Response({'status': 'success', 'response': response})
         except Exception as e:
             return Response({'status': 'error', 'message': str(e)})
+
+
+from django.db import transaction
+from app.models import Wallet, LinkedAccount, Transaction
+
+
+def transfer_to_bank_account(user_id, amount, bank_account_id):
+    with transaction.atomic():
+        user_wallet = Wallet.objects.get(user_id=user_id)
+        bank_account = LinkedAccount.objects.get(id=bank_account_id)
+
+        if user_wallet.balance < amount:
+            raise ValueError("Insufficient funds")
+
+        # Example API call to transfer funds (pseudo-code)
+        # success = transfer_funds_to_bank_api(user_wallet, bank_account, amount)
+        success = True  # Replace with actual API response
+
+        if not success:
+            raise Exception("Bank transfer failed")
+
+        user_wallet.balance -= amount
+        user_wallet.save()
+
+        # Record transaction
+        Transaction.objects.create(
+            user=user_wallet.user,
+            amount=amount,
+            type='transfer_to_bank',
+            details=f"Transferred to bank account {bank_account.id}"
+        )
+
+
+def transfer_to_wallet(sender_id, receiver_id, amount):
+    with transaction.atomic():
+        sender_wallet = Wallet.objects.get(user_id=sender_id)
+        receiver_wallet = Wallet.objects.get(user_id=receiver_id)
+
+        if sender_wallet.balance < amount:
+            raise ValueError("Insufficient funds")
+
+        sender_wallet.balance -= amount
+        receiver_wallet.balance += amount
+
+        sender_wallet.save()
+        receiver_wallet.save()
+
+        # Record transactions
+        Transaction.objects.create(
+            user=sender_wallet.user,
+            amount=amount,
+            type='transfer_to_wallet',
+            details=f"Transferred to wallet of user {receiver_id}"
+        )
+        Transaction.objects.create(
+            user=receiver_wallet.user,
+            amount=amount,
+            type='transfer_from_wallet',
+            details=f"Received from wallet of user {sender_id}"
+        )
+
+
+def transfer_to_third_party_bank(user_id, amount, third_party_bank_details):
+    with transaction.atomic():
+        user_wallet = Wallet.objects.get(user_id=user_id)
+
+        if user_wallet.balance < amount:
+            raise ValueError("Insufficient funds")
+
+        # Example API call to transfer funds to a third-party bank (pseudo-code)
+        # success = transfer_funds_to_third_party_bank_api(user_wallet, third_party_bank_details, amount)
+        success = True  # Replace with actual API response
+
+        if not success:
+            raise Exception("Transfer to third-party bank failed")
+
+        user_wallet.balance -= amount
+        user_wallet.save()
+
+        # Record transaction
+        Transaction.objects.create(
+            user=user_wallet.user,
+            amount=amount,
+            type='transfer_to_third_party_bank',
+            details=f"Transferred to third-party bank account"
+        )
+
+
+def transfer_to_crypto_address(user_id, amount, crypto_address):
+    with transaction.atomic():
+        user_wallet = Wallet.objects.get(user_id=user_id)
+
+        if user_wallet.balance < amount:
+            raise ValueError("Insufficient funds")
+
+        # Example API call to transfer funds to a crypto address (pseudo-code)
+        # success = transfer_funds_to_crypto_address_api(user_wallet, crypto_address, amount)
+        success = True  # Replace with actual API response
+
+        if not success:
+            raise Exception("Crypto transfer failed")
+
+        user_wallet.balance -= amount
+        user_wallet.save()
+
+        # Record transaction
+        Transaction.objects.create(
+            user=user_wallet.user,
+            amount=amount,
+            type='transfer_to_crypto_address',
+            details=f"Transferred to crypto address {crypto_address}"
+        )
 
 
 class TransactionViewSet(viewsets.ModelViewSet):
@@ -302,6 +428,7 @@ class UnlinkAccountView(APIView):
         return Response({'status': 'success', 'message': 'Account unlinked successfully'})
 
 
+'''  
 class CryptoWalletConnectInitiateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -351,3 +478,44 @@ def record_transaction(user, transaction_id, amount, currency, date, status, des
         description=description
     )
     return transaction
+'''
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def register_user(request):
+    serializer = UserSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({
+            'user': UserSerializer(user).data,
+            'token': token.key
+        }, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def login_user(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    try:
+        user = User.objects.get(username=username)
+    except ObjectDoesNotExist:
+        return Response({'error': 'User does not exist'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not user.check_password(password):
+        return Response({'error': 'Wrong password'}, status=status.HTTP_400_BAD_REQUEST)
+
+    token, _ = Token.objects.get_or_create(user=user)
+    return Response({
+        'user': UserSerializer(user).data,
+        'token': token.key
+    })
+
+
+@api_view(['POST'])
+def logout_user(request):
+    request.user.auth_token.delete()
+    return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)

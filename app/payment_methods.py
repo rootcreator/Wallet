@@ -1,8 +1,6 @@
 import requests
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-
-from app.stellar_anchors import ANCHORS
 from wallet.settings import FLUTTERWAVE_API_KEY, CIRCLE_API_KEY, SETTLE_API_KEY, TEMPO_API_KEY, VIRGOCX_API_KEY
 
 
@@ -33,6 +31,7 @@ def initiate_flutterwave_deposit(user, amount, currency):
 
 
 def initiate_circle_deposit(user, amount, currency):
+    from app.stellar_anchors import ANCHORS
     url = ANCHORS['US']['deposit_url']
     headers = {
         "Authorization": f"Bearer {CIRCLE_API_KEY}",
@@ -58,6 +57,7 @@ def initiate_circle_deposit(user, amount, currency):
 
 
 def initiate_tempo_deposit(user, amount, currency):
+    from app.stellar_anchors import ANCHORS
     url = ANCHORS['EU']['deposit_url']
     headers = {
         "Authorization": f"Bearer {TEMPO_API_KEY}",

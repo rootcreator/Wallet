@@ -1,15 +1,26 @@
-from django.conf import settings
+from django.core.mail import send_mail
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from cryptography.fernet import Fernet
+from django.dispatch import receiver
+from django.urls import reverse
+from django_rest_passwordreset.signals import reset_password_token_created
 from stellar_sdk import Keypair, Server
 from decimal import Decimal
+from django.utils.functional import cached_property
+from django.conf import settings
+from django.db.models import F
 
 
 def validate_positive(value):
     if value <= 0:
         raise ValidationError('Amount must be positive.')
+
+
+def clean(self):
+    if self.transaction_type == 'withdrawal' and self.amount > self.wallet.balance:
+        raise ValidationError("Insufficient balance for this withdrawal.")
 
 
 SECRET_KEY = Fernet.generate_key()  # Secure this in settings/environment variables
@@ -40,9 +51,20 @@ class Wallet(models.Model):
         super().save(*args, **kwargs)
 
     def update_balance_from_stellar(self):
-        stellar_balance = get_stellar_balance(self.stellar_public_key)
-        self.balance = stellar_balance  # Sync balance with Stellar
-        self.save()
+        try:
+            stellar_balance = get_stellar_balance(self.stellar_public_key)
+            self.balance = stellar_balance
+            self.save()
+        except Exception as e:
+            # Log the error and handle it appropriately
+            print(f"Error updating balance from Stellar: {e}")
+
+    @cached_property
+    def decrypted_private_key(self):
+        return decrypt_token(self.stellar_private_key)
+
+    def update_wallet_balance(self, amount):
+        Wallet.objects.filter(pk=self.pk).update(balance=F('balance') + amount)
 
 
 # Helper function to get Stellar balance
@@ -68,18 +90,6 @@ class Transaction(models.Model):
     transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPES)
     timestamp = models.DateTimeField(auto_now_add=True)
     description = models.TextField(null=True, blank=True)  # Optional field for additional notes
-
-
-SECRET_KEY = Fernet.generate_key()
-cipher_suite = Fernet(SECRET_KEY)
-
-
-def encrypt_token(token):
-    return cipher_suite.encrypt(token.encode()).decode()
-
-
-def decrypt_token(encrypted_token):
-    return cipher_suite.decrypt(encrypted_token.encode()).decode()
 
 
 class LinkedAccount(models.Model):
@@ -151,6 +161,7 @@ class UserProfile(models.Model):
     wallet = models.OneToOneField(Wallet, on_delete=models.CASCADE)  # Associate with Wallet
     mono_user_id = models.CharField(max_length=255, null=True, blank=True)  # For Mono user ID
     plaid_user_id = models.CharField(max_length=255, null=True, blank=True)  # For Plaid user ID
+    country = models.TextField(max_length=56, blank=True, null=True)
 
     def __str__(self):
         return self.user.username
@@ -161,3 +172,19 @@ class UserProfile(models.Model):
 
     def update_wallet_balance(self, amount):
         self.wallet.update_balance(amount)
+
+
+@receiver(reset_password_token_created)
+def password_reset_token_created(sender, instance, reset_password_token, *args, **kwargs):
+    email_plaintext_message = "{}?token={}".format(reverse('password_reset:reset-password-request'), reset_password_token.key)
+
+    send_mail(
+        # title:
+        "Password Reset for {title}".format(title="Your Website Title"),
+        # message:
+        email_plaintext_message,
+        # from:
+        "noreply@yourdomain.com",
+        # to:
+        [reset_password_token.user.email]
+    )
