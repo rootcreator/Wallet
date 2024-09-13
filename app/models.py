@@ -1,16 +1,15 @@
-from django.core.mail import send_mail
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from cryptography.fernet import Fernet
-from django.dispatch import receiver
-from django.urls import reverse
-from django_rest_passwordreset.signals import reset_password_token_created
 from stellar_sdk import Keypair, Server
 from decimal import Decimal
 from django.utils.functional import cached_property
-from django.conf import settings
 from django.db.models import F
+from django.dispatch import receiver
+from django.core.mail import send_mail
+from django.urls import reverse
+from django_rest_passwordreset.signals import reset_password_token_created
 
 
 def validate_positive(value):
@@ -39,11 +38,10 @@ class Wallet(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     balance = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, validators=[validate_positive])
     currency = models.CharField(max_length=3, default='USD')
-    stellar_public_key = models.CharField(max_length=56, blank=True, null=True)  # Stellar public key
+    stellar_public_key = models.CharField(max_length=56, blank=True, null=True)
     stellar_private_key = models.CharField(max_length=56, blank=True, null=True)  # Stellar private key (encrypted)
 
     def save(self, *args, **kwargs):
-        # Generate Stellar keypair on wallet creation if not already present
         if not self.stellar_public_key or not self.stellar_private_key:
             keypair = Keypair.random()
             self.stellar_public_key = keypair.public_key
@@ -66,13 +64,16 @@ class Wallet(models.Model):
     def update_wallet_balance(self, amount):
         Wallet.objects.filter(pk=self.pk).update(balance=F('balance') + amount)
 
+    def get_balance(self):
+        return self.balance
+
 
 # Helper function to get Stellar balance
 def get_stellar_balance(public_key):
     server = Server("https://horizon-testnet.stellar.org")
     account = server.accounts().account_id(public_key).call()
 
-    # Retrieve the USDT balance (can be XLM or any other asset code you're using)
+    # Retrieve the USDT balance (or any other asset code you're using)
     for balance in account['balances']:
         if balance['asset_code'] == 'USDT':
             return Decimal(balance['balance'])
@@ -122,7 +123,7 @@ class LinkedAccount(models.Model):
 
 
 class CryptoWalletConnectSession(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     session_id = models.CharField(max_length=255, unique=True)
     uri = models.URLField(max_length=500)
     connected = models.BooleanField(default=False)
@@ -134,7 +135,7 @@ class CryptoWalletConnectSession(models.Model):
 
 
 class CryptoWalletConnectTransaction(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     transaction_id = models.CharField(max_length=255, unique=True)
     amount = models.DecimalField(max_digits=20, decimal_places=8)
     currency = models.CharField(max_length=10)
@@ -147,7 +148,7 @@ class CryptoWalletConnectTransaction(models.Model):
 
 
 class CryptoWalletConnectConnection(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     wallet_address = models.CharField(max_length=255)
     connection_date = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=50)
@@ -176,7 +177,8 @@ class UserProfile(models.Model):
 
 @receiver(reset_password_token_created)
 def password_reset_token_created(sender, instance, reset_password_token, *args, **kwargs):
-    email_plaintext_message = "{}?token={}".format(reverse('password_reset:reset-password-request'), reset_password_token.key)
+    email_plaintext_message = "{}?token={}".format(reverse('password_reset:reset-password-request'),
+                                                   reset_password_token.key)
 
     send_mail(
         # title:

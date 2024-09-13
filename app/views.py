@@ -3,29 +3,29 @@ import logging
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
+from django.db import transaction
 from django.http import HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
-from rest_framework import serializers
-from rest_framework import status
-from rest_framework import viewsets
+from django.views.decorators.http import require_http_methods
+from rest_framework import status, viewsets
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from app.link_mono_client import (
+from app.services.direct_withdrawal import handle_fiat_withdrawal_callback, initiate_fiat_withdrawal
+from app.services.link_mono_client import (
     authenticate, set_user_id, get_account, get_transactions, get_statement,
     get_credits, get_debits, get_identity, bvn_lookup
 )
-from app.link_plaid_client import create_link_token, exchange_public_token
-from app.models import Wallet
-from app.serializers import WalletSerializer, TransactionSerializer
-from app.stellar_anchors import ANCHORS
-from app.stellar_services import stellar_deposit, stellar_transfer
-from .serializers import UserSerializer
+from app.services.link_plaid_client import create_link_token, exchange_public_token
+from app.models import Wallet, LinkedAccount, Transaction
+from app.serializers import WalletSerializer, TransactionSerializer, WithdrawSerializer, DepositSerializer, \
+    TransferSerializer, UserSerializer
+from app.services.stellar_anchors import ANCHORS
+from app.services.stellar_services import stellar_deposit, stellar_transfer
 
 # from app.link_walletconnect import wc
 
@@ -56,30 +56,29 @@ class WalletViewSet(viewsets.ModelViewSet):
     serializer_class = WalletSerializer
 
 
-class DepositSerializer(serializers.Serializer):
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
-    currency = serializers.CharField(max_length=3, default='USD')
-
-
 class DepositView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         serializer = DepositSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({'status': 'error', 'message': serializer.errors})
+        serializer.is_valid(raise_exception=True)  # Automatically raises validation errors
 
-        wallet = Wallet.objects.get(user=request.user)
         amount = serializer.validated_data['amount']
         currency = serializer.validated_data['currency']
 
+        wallet = get_object_or_404(Wallet, user=request.user)
+
         try:
             response = initiate_deposit(request.user, amount, currency)
-            wallet.update_balance_from_stellar()
-            return Response({'status': 'success', 'response': response})
-        except Exception as e:
+            wallet.update_balance_from_stellar()  # Sync the wallet after deposit
+            return Response({'status': 'success', 'response': response}, status=status.HTTP_200_OK)
+        except ValueError as e:
             logger.error(f"Deposit failed for user {request.user.id}: {str(e)}")
-            return Response({'status': 'error', 'message': str(e)})
+            return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Unexpected error during deposit: {str(e)}")
+            return Response({'status': 'error', 'message': 'An unexpected error occurred'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def initiate_deposit(user, amount, currency):
@@ -106,17 +105,24 @@ class WithdrawView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        serializer = WithdrawSerializer(data=request.data)  # A new serializer for withdraw input validation
+        serializer.is_valid(raise_exception=True)
+
         wallet = get_object_or_404(Wallet, user=request.user)
-        amount = request.data.get('amount')
-        currency = request.data.get('currency', 'USD')  # Default to 'USD' if not provided
-        destination_public_key = request.data.get('destination_public_key')
+        amount = serializer.validated_data['amount']
+        currency = serializer.validated_data['currency']
 
         try:
             response = initiate_withdrawal(request.user, amount, currency)
-            wallet.update_balance_from_stellar()  # Sync the wallet balance after the transaction
-            return Response({'status': 'success', 'response': response})
+            wallet.update_balance_from_stellar()  # Sync the wallet after withdrawal
+            return Response({'status': 'success', 'response': response}, status=status.HTTP_200_OK)
+        except ValueError as e:
+            logger.error(f"Withdrawal failed for user {request.user.id}: {str(e)}")
+            return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'status': 'error', 'message': str(e)})
+            logger.error(f"Unexpected error during withdrawal: {str(e)}")
+            return Response({'status': 'error', 'message': 'An unexpected error occurred'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def initiate_withdrawal(user, amount, currency):
@@ -146,21 +152,25 @@ class TransferView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        serializer = TransferSerializer(data=request.data)  # A new serializer for transfer input validation
+        serializer.is_valid(raise_exception=True)
+
         wallet = get_object_or_404(Wallet, user=request.user)
-        amount = request.data.get('amount')
-        destination_wallet_id = request.data.get('destination_wallet_id')
-        destination_wallet = get_object_or_404(Wallet, id=destination_wallet_id)
+        amount = serializer.validated_data['amount']
+        destination_wallet = get_object_or_404(Wallet, id=serializer.validated_data['destination_wallet_id'])
+
         try:
             response = stellar_transfer(wallet, amount, destination_wallet)
-            wallet.update_balance_from_stellar()  # Sync the wallet balance after the transaction
-            destination_wallet.update_balance_from_stellar()  # Sync destination wallet balance
-            return Response({'status': 'success', 'response': response})
+            wallet.update_balance_from_stellar()
+            destination_wallet.update_balance_from_stellar()
+            return Response({'status': 'success', 'response': response}, status=status.HTTP_200_OK)
+        except ValueError as e:
+            logger.error(f"Transfer failed for user {request.user.id}: {str(e)}")
+            return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            return Response({'status': 'error', 'message': str(e)})
-
-
-from django.db import transaction
-from app.models import Wallet, LinkedAccount, Transaction
+            logger.error(f"Unexpected error during transfer: {str(e)}")
+            return Response({'status': 'error', 'message': 'An unexpected error occurred'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 def transfer_to_bank_account(user_id, amount, bank_account_id):
@@ -519,3 +529,47 @@ def login_user(request):
 def logout_user(request):
     request.user.auth_token.delete()
     return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)
+
+
+@require_http_methods(["POST"])  # Only allow POST requests
+@login_required  # Ensure the user is authenticated (optional)
+def initiate_fiat_withdrawal_view(request):
+    try:
+        # Extract data from the request body
+        data = request.POST  # or request.json() if you expect JSON
+        amount = float(data.get('amount'))
+        currency = data.get('currency')
+        bank_account_details = data.get('bank_account_details')
+
+        # Call the original function
+        withdrawal_info = initiate_fiat_withdrawal(
+            user=request.user,
+            amount=amount,
+            currency=currency,
+            bank_account_details=bank_account_details
+        )
+
+        # Return success response
+        return JsonResponse({'status': 'success', 'data': withdrawal_info}, status=200)
+
+    except ValueError as ve:
+        logger.error(f"ValueError: {ve}")
+        return JsonResponse({'status': 'error', 'message': str(ve)}, status=400)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        return JsonResponse({'status': 'error', 'message': 'Withdrawal failed'}, status=500)
+
+
+@require_http_methods(["POST"])  # Only allow POST requests
+def handle_fiat_withdrawal_callback_view(request):
+    try:
+        # Extract data from request (assuming JSON payload from external service)
+        data = request.json()
+
+        # Call the original webhook handler function
+        return handle_fiat_withdrawal_callback(request)
+
+    except Exception as e:
+        logger.error(f"Error in webhook callback: {e}")
+        return JsonResponse({'status': 'error', 'message': 'Callback failed'}, status=500)
+

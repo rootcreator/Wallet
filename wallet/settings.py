@@ -1,9 +1,24 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+import environ
+from datetime import timedelta
+
+# JWT settings
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+}
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Initialize environment variables
+env = environ.Env()
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
+# Use environment variables
+load_dotenv()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
@@ -48,12 +63,19 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.BasicAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ],
 }
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:55078",  # Replace with your actual frontend URL
-    "http://127.0.0.1:8000",   # If running Django on a different port
+
+    "http://127.0.0.1:8000",  # If running Django on a different port
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost:\d+$",  # Allow all ports on localhost
+    r"^http://127.0.0.1:\d+$",  # Allow all ports on 127.0.0.1
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -63,11 +85,12 @@ CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
     'http://localhost:55078',
     'http://127.0.0.1:8000',
+    'http://localhost:53884',
 ]
 
+CSRF_COOKIE_SAMESITE = None
+
 CSRF_COOKIE_SECURE = False  # Ensure this is False for development; set to True in production with HTTPS
-
-
 
 ROOT_URLCONF = 'wallet.urls'
 
@@ -117,13 +140,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.BasicAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
-    ],
-}
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
 
@@ -145,29 +161,6 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Use environment variables
-load_dotenv()
-
-MONO_SEC_KEY = os.getenv('MONO_SEC_KEY')
-
-FLUTTERWAVE_API_KEY = 'your_flutterwave_api_key_here'
-TEMPO_API_KEY = 'your_tempo_api_key_here'
-CIRCLE_API_KEY = 'your_circle_api_key_here'
-SETTLE_API_KEY = 'your_circle_api_key_here'
-VIRGOCX_API_KEY = 'your_circle_api_key_here'
-
-
-CSRF_COOKIE_SAMESITE = None
-
-
-# JWT settings
-from datetime import timedelta
-
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-}
-
 # Email settings (for password reset and email verification)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.your-email-provider.com'
@@ -175,3 +168,16 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'your-email@example.com'
 EMAIL_HOST_PASSWORD = 'your-email-password'
+
+# APIs
+MONO_SEC_KEY = os.getenv('MONO_SEC_KEY')
+
+FLUTTERWAVE_API_KEY = 'FLWPUBK_TEST-c43e4997a6e8b18614bc6c8ae13f265b-X'
+TEMPO_API_KEY = 'your_tempo_api_key_here'
+CIRCLE_API_KEY = 'your_circle_api_key_here'
+SETTLE_API_KEY = 'your_circle_api_key_here'
+VIRGOCX_API_KEY = 'your_circle_api_key_here'
+
+PLAID_CLIENT_ID = env('PLAID_CLIENT_ID')
+PLAID_SECRET = env('PLAID_SECRET')
+PLAID_ENVIRONMENT = env('PLAID_ENVIRONMENT', default='sandbox')

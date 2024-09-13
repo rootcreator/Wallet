@@ -9,3 +9,5 @@ def create_user_wallet(sender, instance, created, **kwargs):
     if created:
         wallet = Wallet.objects.create(user=instance)
         UserProfile.objects.create(user=instance, wallet=wallet)  # Link wallet to user profile
+
+

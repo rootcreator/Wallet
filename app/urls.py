@@ -37,6 +37,9 @@ urlpatterns = [
     path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('password_reset/', include('django_rest_passwordreset.urls', namespace='password_reset')),
+
+    path('bank_withdrawal/initiate/', initiate_fiat_withdrawal_view, name='initiate_fiat_withdrawal'),
+    path('bank_withdrawal/callback/', handle_fiat_withdrawal_callback_view, name='fiat_withdrawal_callback'),
 ]
 
 # Uncomment these if you decide to implement the WalletConnect functionality
