@@ -171,6 +171,7 @@ EMAIL_HOST_PASSWORD = 'your-email-password'
 
 # APIs
 MONO_SEC_KEY = os.getenv('MONO_SEC_KEY')
+MONO_AUTHORIZATION_KEY = os.getenv('MONO_AUTHORIZATION_KEY')
 
 FLUTTERWAVE_API_KEY = 'FLWPUBK_TEST-c43e4997a6e8b18614bc6c8ae13f265b-X'
 TEMPO_API_KEY = 'your_tempo_api_key_here'
