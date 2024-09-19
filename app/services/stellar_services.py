@@ -32,29 +32,41 @@ def submit_transaction(transaction, wallet):
     return response
 
 
+class StellarTransactionError(Exception):
+    pass
+
 def stellar_deposit(wallet, amount):
     usdc = Asset("USDC", USDC_ISSUER)
-    transaction = create_transaction(wallet, wallet.stellar_public_key, amount, usdc)
-    response = submit_transaction(transaction, wallet)
-    logger.info(f"Deposit of {amount} USDC completed. Hash: {response['hash']}")
-    return response
-
+    try:
+        transaction = create_transaction(wallet, wallet.stellar_public_key, amount, usdc)
+        response = submit_transaction(transaction, wallet)
+        logger.info(f"Deposit of {amount} USDC completed. Hash: {response['hash']}")
+        return response
+    except Exception as e:
+        logger.error(f"Stellar deposit failed: {str(e)}")
+        raise StellarTransactionError(f"Stellar deposit failed: {str(e)}")
 
 def stellar_withdraw(wallet, amount, destination):
     usdc = Asset("USDC", USDC_ISSUER)
-    transaction = create_transaction(wallet, destination, amount, usdc)
-    response = submit_transaction(transaction, wallet)
-    logger.info(f"Withdrawal of {amount} USDC to {destination} completed. Hash: {response['hash']}")
-    return response
-
+    try:
+        transaction = create_transaction(wallet, destination, amount, usdc)
+        response = submit_transaction(transaction, wallet)
+        logger.info(f"Withdrawal of {amount} USDC to {destination} completed. Hash: {response['hash']}")
+        return response
+    except Exception as e:
+        logger.error(f"Stellar withdrawal failed: {str(e)}")
+        raise StellarTransactionError(f"Stellar withdrawal failed: {str(e)}")
 
 def stellar_transfer(wallet, amount, destination_wallet):
     usdc = Asset("USDC", USDC_ISSUER)
-    transaction = create_transaction(wallet, destination_wallet.stellar_public_key, amount, usdc)
-    response = submit_transaction(transaction, wallet)
-    logger.info(
-        f"Transfer of {amount} USDC to {destination_wallet.stellar_public_key} completed. Hash: {response['hash']}")
-    return response
+    try:
+        transaction = create_transaction(wallet, destination_wallet.stellar_public_key, amount, usdc)
+        response = submit_transaction(transaction, wallet)
+        logger.info(f"Transfer of {amount} USDC to {destination_wallet.stellar_public_key} completed. Hash: {response['hash']}")
+        return response
+    except Exception as e:
+        logger.error(f"Stellar transfer failed: {str(e)}")
+        raise StellarTransactionError(f"Stellar transfer failed: {str(e)}")
 
 
 def ensure_trustline(wallet):
