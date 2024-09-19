@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'django_rest_passwordreset',
     'corsheaders',
     'app',
+    'links'
 
 ]
 
@@ -66,11 +67,19 @@ REST_FRAMEWORK = {
         'rest_framework.authentication.BasicAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'user': '10/minute',  # e.g., limit to 5 requests per minute per user
+    }
+
 }
 
 CORS_ALLOWED_ORIGINS = [
 
     "http://127.0.0.1:8000",  # If running Django on a different port
+    "http://localhost:53045",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -79,18 +88,18 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-#CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_ALL_ORIGINS = True
 
-
+'''
 CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:55078',
     'http://127.0.0.1:8000',
-    'http://localhost:53884',
+    'http://localhost:53045',
 ]
 
 CSRF_COOKIE_SAMESITE = None
 
 CSRF_COOKIE_SECURE = False  # Ensure this is False for development; set to True in production with HTTPS
+'''
 
 ROOT_URLCONF = 'wallet.urls'
 
@@ -155,6 +164,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
