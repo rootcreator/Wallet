@@ -1,116 +1,102 @@
-from django.core.mail import send_mail
+import uuid
+
 from django.db import models
-from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
-from cryptography.fernet import Fernet
-from django.dispatch import receiver
-from django.urls import reverse
-from django_rest_passwordreset.signals import reset_password_token_created
-from stellar_sdk import Keypair, Server
-from decimal import Decimal
-from django.conf import settings
-from django.core.validators import MinValueValidator
+from django.contrib.auth.models import AbstractUser
 
 
-def validate_positive(value):
-    if value <= 0:
-        raise ValidationError('Amount must be positive.')
+class User(AbstractUser):
+    email = models.EmailField(unique=True)
 
+    groups = models.ManyToManyField(
+        'auth.Group',
+        related_name='custom_user_set',  # Change this to avoid clashes
+        blank=True,
+        help_text='The groups this user belongs to.',
+        verbose_name='groups',
+    )
 
-class Wallet(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
-    balance = models.DecimalField(max_digits=19, decimal_places=7, default=0.00, validators=[MinValueValidator(0)])
-    stellar_public_key = models.CharField(max_length=56, unique=True)
-    stellar_private_key = models.CharField(max_length=88)  # Increased length for encrypted key
+    user_permissions = models.ManyToManyField(
+        'auth.Permission',
+        related_name='custom_user_permissions_set',  # Change this to avoid clashes
+        blank=True,
+        help_text='Specific permissions for this user.',
+        verbose_name='user permissions',
+    )
 
-    def save(self, *args, **kwargs):
-        if not self.stellar_public_key or not self.stellar_private_key:
-            keypair = Keypair.random()
-            self.stellar_public_key = keypair.public_key
-            self.stellar_private_key = self.encrypt_key(keypair.secret)
-        super().save(*args, **kwargs)
+    # Add any additional fields you need
 
-    @staticmethod
-    def encrypt_key(key):
-        f = Fernet(settings.FERNET_KEY)
-        return f.encrypt(key.encode()).decode()
-
-    @staticmethod
-    def decrypt_key(encrypted_key):
-        f = Fernet(settings.FERNET_KEY)
-        return f.decrypt(encrypted_key.encode()).decode()
-
-    def get_stellar_balance(self):
-        server = Server("https://horizon.stellar.org")  # Use mainnet
-        account = server.accounts().account_id(self.stellar_public_key).call()
-        for balance in account['balances']:
-            if balance['asset_type'] == 'credit_alphanum4' and balance['asset_code'] == 'USDC':
-                return Decimal(balance['balance'])
-        return Decimal(0)
-
-    def update_balance(self):
-        stellar_balance = self.get_stellar_balance()
-        if stellar_balance != self.balance:
-            self.balance = stellar_balance
-            self.save(update_fields=['balance'])
-
-
-class Transaction(models.Model):
-    TRANSACTION_TYPES = [
-        ('deposit', 'Deposit'),
-        ('withdrawal', 'Withdrawal'),
-        ('transfer', 'Transfer'),
-    ]
-    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=19, decimal_places=7, validators=[validate_positive])
-    transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPES)
-    timestamp = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=20, default='pending')
-    stellar_transaction_hash = models.CharField(max_length=64, blank=True, null=True)
-
-    def save(self, *args, **kwargs):
-        if self.transaction_type == 'withdrawal' and self.amount > self.wallet.balance:
-            raise ValidationError("Insufficient balance for this withdrawal.")
-        super().save(*args, **kwargs)
+    def __str__(self):
+        return self.username
 
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    wallet = models.OneToOneField(Wallet, on_delete=models.CASCADE)  # Associate with Wallet
-    country = models.CharField(max_length=56, blank=True, null=True)
-    dob = models.DateField(max_length=500, blank=True, null=True)
-
-    KYC_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('verified', 'Verified'),
-        ('rejected', 'Rejected'),
-    ]
-
-    kyc_status = models.CharField(max_length=10, choices=KYC_STATUS_CHOICES, default='pending')
-    kyc_document = models.FileField(upload_to='kyc_documents/', blank=True, null=True)
+    birth_date = models.DateField(null=True, blank=True)
+    kyc_status = models.CharField(
+        max_length=50,
+        choices=[("pending", "Pending"), ("rejected", "Rejected"), ("approved", "Approved")],
+        default="pending"
+    )
+    region = models.CharField(
+        max_length=50,
+        choices=[("AF", "Africa"), ("EU", "Europe"), ("US", "United States"), ("LATAM", "Latin America")]
+    )
 
     def __str__(self):
-        return self.user.username
-
-    def get_wallet_balance(self):
-        return self.wallet.balance
-
-    def update_wallet_balance(self, amount):
-        self.wallet.update_balance(amount)
+        return f"{self.user.username} - {self.kyc_status}"
 
 
-@receiver(reset_password_token_created)
-def password_reset_token_created(sender, instance, reset_password_token, *args, **kwargs):
-    email_plaintext_message = "{}?token={}".format(reverse('password_reset:reset-password-request'),
-                                                   reset_password_token.key)
+class Transaction(models.Model):
+    TRANSACTION_TYPE_CHOICES = [
+        ('deposit', 'Deposit'),
+        ('withdraw', 'Withdraw'),
+        ('transfer', 'Transfer')
+    ]
 
-    send_mail(
-        # title:
-        "Password Reset for {title}".format(title="Your Website Title"),
-        # message:
-        email_plaintext_message,
-        # from:
-        "noreply@yourdomain.com",
-        # to:
-        [reset_password_token.user.email]
-    )
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed')
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_index=True)
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPE_CHOICES)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    external_transaction_id = models.CharField(max_length=255, blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    description = models.TextField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.transaction_type} - {self.status}"
+
+
+class USDAccount(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="usd_account")
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)  # Store in USD
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def deposit(self, amount):
+        """Credit account with deposit"""
+        if amount <= 0:
+            raise ValueError("Deposit amount must be positive.")
+        self.balance += amount
+        self.save()
+
+    def withdraw(self, amount):
+        """Debit account with withdrawal"""
+        if amount <= 0:
+            raise ValueError("Withdrawal amount must be positive.")
+        if amount > self.balance:
+            raise ValueError("Insufficient balance")
+        self.balance -= amount
+        self.save()
+
+    def get_transaction_history(self):
+        """Retrieve all transactions for the user's account."""
+        return Transaction.objects.filter(user=self.user).order_by('-created_at')
+
+    def __str__(self):
+        return f"{self.user.username} - Balance: ${self.balance}"

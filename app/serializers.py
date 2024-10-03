@@ -1,6 +1,7 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
-from .models import Wallet, Transaction, UserProfile
 from django.contrib.auth.models import User
+from .models import UserProfile, Transaction, USDAccount
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -9,55 +10,34 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ('id', 'username', 'email', 'password')
+        extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
-        user = User.objects.create_user(**validated_data)
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            password=validated_data['password']
+        )
         return user
 
 
-class WalletSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Wallet
-        fields = ['id', 'user', 'balance']
-
-
-class DepositSerializer(serializers.Serializer):
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
-    currency = serializers.CharField(max_length=3, default='USD')
-
-
-class TransferSerializer(serializers.Serializer):
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
-    currency = serializers.CharField(max_length=3, default='USD')
-    destination_tag = serializers.CharField(max_length=56)
-
-
-class WithdrawSerializer(serializers.Serializer):
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
-    currency = serializers.CharField(max_length=3, default='USD')
-    destination_public_key = serializers.CharField(max_length=56)
-
-
-class TransactionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Transaction
-        fields = ['id', 'wallet', 'amount', 'transaction_type', 'timestamp']
-
-    @staticmethod
-    def validate_amount(value):
-        if value <= 0:
-            raise serializers.ValidationError('Amount must be positive.')
-        return value
+User = get_user_model()
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
-        fields = ['user', 'wallet', 'country', 'dob', 'kyc_status', 'kyc_document']
+        fields = ['id', 'kyc_status', 'region', 'birth_date']
 
-    def update(self, instance, validated_data):
-        instance.country = validated_data.get('country', instance.country)
-        instance.bio = validated_data.get('bio', instance.bio)
-        instance.kyc_document = validated_data.get('kyc_document', instance.kyc_document)
-        instance.save()
-        return instance
+
+class TransactionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Transaction
+        fields = ['id', 'user', 'amount', 'transaction_type', 'status',
+                  'created_at']  # Ensure the field name is correct
+
+
+class USDAccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = USDAccount
+        fields = ['user', 'balance']

@@ -1,33 +1,19 @@
-import os
-from pathlib import Path
-from dotenv import load_dotenv
-import environ
 from datetime import timedelta
-
-# JWT settings
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-}
+from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Initialize environment variables
-env = environ.Env()
-environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
-
-# Use environment variables
-load_dotenv()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-s_csmse6imnj89$^#!-qtuv)(yfx9z%1y-nsd2h2bnf1gwr=yz'
+SECRET_KEY = 'django-insecure-wg8^fa)6f=+i4-^xhb9vkag#ow-q+&pi(tfq_2i&yu4)^k(wiz'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
+
+
 
 ALLOWED_HOSTS = []
 
@@ -41,12 +27,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework.authtoken',
-    'django_rest_passwordreset',
     'corsheaders',
+    'knox',
     'app',
-    'links'
-
 ]
 
 MIDDLEWARE = [
@@ -60,48 +43,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
-        'rest_framework.authentication.BasicAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
-    ],
-    'DEFAULT_THROTTLE_CLASSES': [
-        'rest_framework.throttling.UserRateThrottle',
-    ],
-    'DEFAULT_THROTTLE_RATES': {
-        'user': '10/minute',  # e.g., limit to 5 requests per minute per user
-    }
-
-}
-
-CORS_ALLOWED_ORIGINS = [
-
-    "http://127.0.0.1:8000",  # If running Django on a different port
-    "http://localhost:53045",
-]
-
-CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^http://localhost:\d+$",  # Allow all ports on localhost
-    r"^http://127.0.0.1:\d+$",  # Allow all ports on 127.0.0.1
-]
-
-CORS_ALLOW_CREDENTIALS = True
-# CORS_ALLOW_ALL_ORIGINS = True
-
-'''
-CSRF_TRUSTED_ORIGINS = [
-    'http://127.0.0.1:8000',
-    'http://localhost:53045',
-]
-
-CSRF_COOKIE_SAMESITE = None
-
-CSRF_COOKIE_SECURE = False  # Ensure this is False for development; set to True in production with HTTPS
-'''
-
-ROOT_URLCONF = 'wallet.urls'
+ROOT_URLCONF = 'bank.urls'
 
 TEMPLATES = [
     {
@@ -119,7 +61,47 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'wallet.wsgi.application'
+WSGI_APPLICATION = 'bank.wsgi.application'
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': ('knox.auth.TokenAuthentication',),
+
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle'
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',
+        'user': '1000/day'
+    },
+
+}
+
+
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+
+# 4. Configure Knox settings
+REST_KNOX = {
+    'TOKEN_TTL': timedelta(hours=10),
+    'USER_SERIALIZER': 'path.to.your.UserSerializer',
+}
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOWED_ORIGINS = [
+
+    "http://127.0.0.1:8000",  # If running Django on a different port
+    "http://localhost:59900",
+]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost:\d+$",  # Allow all ports on localhost
+    r"^http://127.0.0.1:\d+$",  # Allow all ports on 127.0.0.1
+]
+
+CORS_ALLOW_CREDENTIALS = True
 
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
@@ -165,9 +147,6 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
@@ -181,16 +160,12 @@ EMAIL_USE_TLS = True
 EMAIL_HOST_USER = 'your-email@example.com'
 EMAIL_HOST_PASSWORD = 'your-email-password'
 
-# APIs
-MONO_SEC_KEY = os.getenv('MONO_SEC_KEY')
-MONO_AUTHORIZATION_KEY = os.getenv('MONO_AUTHORIZATION_KEY')
+CIRCLE_API_KEY = 'your_circle_api_key'
+CIRCLE_API_SECRET = 'your_circle_api_secret'
+CIRCLE_API_URL = 'https://api.circle.com/v1/'  # Update with the correct endpoint
 
-FLUTTERWAVE_API_KEY = 'FLWPUBK_TEST-c43e4997a6e8b18614bc6c8ae13f265b-X'
-TEMPO_API_KEY = 'your_tempo_api_key_here'
-CIRCLE_API_KEY = 'your_circle_api_key_here'
-SETTLE_API_KEY = 'your_circle_api_key_here'
-VIRGOCX_API_KEY = 'your_circle_api_key_here'
+STELLAR_PLATFORM_SECRET = 'SATHRILKUJWMBOARZ6JIZJH5ZQIDUWAGG4GSFRREOMM7E55UKMYTWHQA'
+ANCHOR_URL = 'https://your-anchor-url.com'
+USDC_ISSUER_PUBLIC_KEY = 'GADJU2EVVSDDJ5KSZFWG5PL4TG5C53H2V2S7A2Z6SBEU7DTLPPUSWZSK'
 
-PLAID_CLIENT_ID = env('PLAID_CLIENT_ID')
-PLAID_SECRET = env('PLAID_SECRET')
-PLAID_ENVIRONMENT = env('PLAID_ENVIRONMENT', default='sandbox')
+AUTH_USER_MODEL = 'app.User'
